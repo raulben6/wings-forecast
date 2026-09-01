@@ -5,7 +5,8 @@
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikitlearn&logoColor=white)
 ![SciPy](https://img.shields.io/badge/SciPy-8CAAE6?style=flat-square&logo=scipy&logoColor=white)
 ![Open-Meteo](https://img.shields.io/badge/Open--Meteo-FF6B35?style=flat-square)
-![Tests](https://img.shields.io/badge/15_tests-6E9F18?style=flat-square&logo=pytest&logoColor=white)
+![Tests](https://img.shields.io/badge/25_tests-6E9F18?style=flat-square&logo=pytest&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)
 
 **Forecasting daily sales for a small restaurant, using 227 days of its real operating data, a public holiday calendar, and daily weather history.**
 
@@ -100,6 +101,66 @@ And the composition costs money. The delivery marketplace charges **24% commissi
 
 ---
 
+## 🍗 Product-level demand: the pipeline is built, the data is not there yet
+
+Forecasting the daily total tells the owner what the till will hold. It does not
+say **what to buy**. That needs demand per product, which lives in the POS.
+
+The business runs [RestoPos](https://github.com/raulben6/restopos), so I went and
+looked. **The POS has no sales history.** On 2026-09-01 the production database held:
+
+| | |
+|---|---:|
+| Orders | **5**, all on a single day |
+| Line items | 7, across 6 products |
+| Combos configured | **24** (22 active) |
+
+The menu is fully set up. The transactions are not being captured. The business
+records daily totals in a spreadsheet, which is the 227-day series this whole
+project is built on, and individual sales never reach the system.
+
+So the per-product analysis **cannot be run**, and no substitute was invented for it.
+What exists instead is the machinery, ready and tested:
+
+| Piece | State |
+|---|---|
+| `scripts/exportar_pos.py` | **Validated against the live production schema.** Read-only, aggregates product × day inside the database, indexes the amounts. |
+| `src/productos.py` | ABC analysis, per-product weekday profiles, channel mix, per-product series construction. |
+| `scripts/analisis_producto.py` | Runs the descriptives always; **refuses to emit forecast metrics** below the data threshold. |
+| `tests/test_productos.py` | 10 tests over a synthetic dataset, covering the logic that has to be right when real data lands. |
+
+### The gate, and why it exists
+
+```python
+DIAS_MINIMOS = 60
+OBSERVACIONES_MINIMAS_POR_PRODUCTO = 30
+```
+
+Splitting a series by product multiplies the number of series and divides the
+sample behind each one. Fitting a model on a handful of observations per product
+produces numbers that look like results without being results, which is exactly
+the trap the holiday indicator would have been with its three positive cases.
+
+So `comprobar_suficiencia()` is a **gate, not a warning**. Descriptives print at any
+volume. Forecast metrics do not print until there is history to justify them.
+
+### Safety of the exporter
+
+It touches a live business database, so the constraints are explicit and checkable
+in the source: a **single `SELECT`**, a session opened `read_only`, aggregation done
+in the database rather than by pulling rows, and **no access to `users`,
+`operator_id`, customer notes, cancellation reasons or individual payment methods**.
+Amounts are indexed before they are written, exactly as the daily series is.
+
+```bash
+railway run --service Postgres python scripts/exportar_pos.py
+python scripts/analisis_producto.py
+```
+
+`data/ventas_producto.example.csv` documents the output schema.
+
+---
+
 ## 📈 What the data looks like
 
 ![Daily sales](reports/figures/01_serie_temporal.png)
@@ -144,7 +205,7 @@ A random `train_test_split` scatters future days into training and past days int
 Here, every one of the 152 forecasts uses **only data from days strictly before it**, and the models retrain at each step on the expanding window. That claim is not left to trust:
 
 ```bash
-python -m pytest tests/ -q     # 15 passed
+python -m pytest tests/ -q     # 25 passed
 ```
 
 | Test | What it proves |
@@ -171,7 +232,7 @@ python -m pytest tests/ -q     # 15 passed
 
 ## 🔭 What would actually improve it
 
-1. **Item-level data from the POS**, which exists: [RestoPos](https://github.com/raulben6/restopos) is the system this business runs. Forecasting per product turns a revenue estimate into an actual purchase order.
+1. **Get the POS actually capturing sales.** The pipeline for this is already written and validated; it is waiting on transaction history, not on code. Two months of real orders opens the whole product-level analysis.
 2. **Forecast the channel split, not just the total.** Finding 3 says that is where the weather signal lives, and it is also where the margin lives.
 3. **Quantile forecasts instead of a point estimate.** For stock decisions the 80th percentile of demand is more useful than the mean.
 4. **More history.** Two full years would let the holiday question be asked properly.
@@ -189,7 +250,7 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 python scripts/run_analysis.py    # figures + reports/resultados.md
-python -m pytest tests/ -q        # 15 tests
+python -m pytest tests/ -q        # 25 tests
 ```
 
 The weather history is cached in `data/clima_diario.csv`, so the analysis reproduces offline. To refresh it:
@@ -203,6 +264,7 @@ src/
   datos.py            loading, cleaning, the six-day week
   caracteristicas.py  calendar features, lags, rolling means (all closed at t-1)
   externos.py         weather and holidays, operational vs explanatory modes
+  productos.py        ABC analysis and per-product series, with the sufficiency gate
   referencias.py      naive, seasonal naive, moving average, day-of-week mean
   modelos.py          Ridge and gradient boosting, wrapped for walk-forward
   evaluacion.py       rolling-origin validation, metrics, bootstrap CI
@@ -210,12 +272,15 @@ src/
 scripts/
   preparar_datos.py   spreadsheet to indexed dataset (run once, locally)
   descargar_clima.py  Open-Meteo history to a cached CSV
+  exportar_pos.py     read-only product x day export from the POS database
+  analisis_producto.py  product-level analysis, gated on sample size
   run_analysis.py     the full pipeline
 reports/
   resultados.md       generated results
   metricas.json       machine-readable metrics
 tests/
   test_sin_fuga.py    the leakage guarantees above
+  test_productos.py   ABC classification, zero-filling, the sufficiency gate
 ```
 
 ---

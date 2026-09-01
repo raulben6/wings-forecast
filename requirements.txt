@@ -11,6 +11,9 @@ scipy>=1.11
 # Public holiday calendar (El Salvador)
 holidays>=0.50
 
+# Read-only connection to the POS database (scripts/exportar_pos.py only)
+psycopg[binary]>=3.1
+
 # Report figures
 matplotlib>=3.8
 

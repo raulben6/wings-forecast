@@ -16,3 +16,9 @@ data/raw/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Un export del POS SIN indexar lleva unidades e importes reales del negocio.
+# El exportador indexa por defecto; esto es una red de seguridad por si se usa
+# --sin-indexar y el fichero acaba con otro nombre.
+data/*_real.csv
+data/*_sin_indexar.csv
