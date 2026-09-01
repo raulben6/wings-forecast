@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.pytest_cache/
+
+# The operating spreadsheet the dataset is derived from. Never commit it:
+# it holds the real revenue of an identifiable business.
+*.xlsx
+*.xls
+data/raw/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

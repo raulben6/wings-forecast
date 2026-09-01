@@ -1,0 +1,15 @@
+# Data handling
+pandas>=2.2
+numpy>=1.26
+
+# Models, validation and permutation importance
+scikit-learn>=1.5
+
+# Report figures
+matplotlib>=3.8
+
+# Reading the source spreadsheet (scripts/preparar_datos.py only)
+openpyxl>=3.1
+
+# Test suite
+pytest>=8.0

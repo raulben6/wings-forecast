@@ -1,0 +1,68 @@
+{
+  "resumen": {
+    "observaciones": 227,
+    "desde": "2025-10-01",
+    "hasta": "2026-06-30",
+    "media": 100.37,
+    "mediana": 91.91,
+    "desviacion": 41.16,
+    "coef_variacion": 0.4101,
+    "minimo": 22.7,
+    "maximo": 304.49,
+    "mezcla_canales": {
+      "efectivo": 0.4698,
+      "tarjeta": 0.353,
+      "delivery": 0.1772
+    }
+  },
+  "mejor": "Day-of-week mean",
+  "n_validacion": 152,
+  "ic95_mae": [
+    22.621,
+    29.284
+  ],
+  "comparativa": [
+    {
+      "metodo": "Day-of-week mean",
+      "MAE": 25.83,
+      "RMSE": 33.44,
+      "MAPE %": 34.8,
+      "mejora MAE %": 27.6
+    },
+    {
+      "metodo": "Ridge + calendar",
+      "MAE": 26.44,
+      "RMSE": 34.85,
+      "MAPE %": 33.3,
+      "mejora MAE %": 25.9
+    },
+    {
+      "metodo": "Gradient boosting",
+      "MAE": 27.33,
+      "RMSE": 36.77,
+      "MAPE %": 34.9,
+      "mejora MAE %": 23.4
+    },
+    {
+      "metodo": "Moving average (6d)",
+      "MAE": 29.37,
+      "RMSE": 37.64,
+      "MAPE %": 37.1,
+      "mejora MAE %": 17.7
+    },
+    {
+      "metodo": "Seasonal naive",
+      "MAE": 35.69,
+      "RMSE": 45.69,
+      "MAPE %": 43.9,
+      "mejora MAE %": 0.0
+    },
+    {
+      "metodo": "Naive",
+      "MAE": 37.74,
+      "RMSE": 47.5,
+      "MAPE %": 47.2,
+      "mejora MAE %": -5.7
+    }
+  ]
+}
