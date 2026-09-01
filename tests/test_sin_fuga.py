@@ -114,3 +114,71 @@ def test_prediccion_perfecta_da_error_cero():
     real = np.array([10.0, 20.0, 30.0])
     m = evaluacion.metricas(real, real)
     assert m["MAE"] == 0 and m["RMSE"] == 0 and m["MAPE"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Fuentes externas: clima y festivos
+# ---------------------------------------------------------------------------
+
+from src import externos
+
+
+@pytest.fixture
+def clima_falso(tmp_path, serie):
+    """Un CSV de clima con un valor distinto y reconocible por día."""
+    ruta = tmp_path / "clima.csv"
+    filas = ["fecha,temp_max,temp_min,lluvia_mm,horas_lluvia"]
+    for i, f in enumerate(serie["fecha"]):
+        # lluvia = índice de la fila, para poder rastrear de dónde sale cada valor
+        filas.append(f"{f.date()},30.0,20.0,{float(i)},{float(i)}")
+    ruta.write_text("\n".join(filas), encoding="utf-8")
+    return ruta
+
+
+def test_modo_operativo_usa_el_clima_de_ayer(serie, clima_falso):
+    salida, cols = externos.unir(serie, modo="operativo", ruta_clima=clima_falso)
+    # lluvia_mm_ayer en la fila i debe valer i-1, no i
+    assert salida["lluvia_mm_ayer"].iloc[5] == pytest.approx(4.0)
+    assert salida["lluvia_mm_ayer"].iloc[1] == pytest.approx(0.0)
+    assert pd.isna(salida["lluvia_mm_ayer"].iloc[0])
+
+
+def test_modo_operativo_no_expone_el_clima_del_dia(serie, clima_falso):
+    salida, cols = externos.unir(serie, modo="operativo", ruta_clima=clima_falso)
+    for c in externos.COLS_CLIMA_BASE:
+        assert c not in salida.columns, f"{c} filtra el clima del propio día"
+        assert c not in cols
+
+
+def test_modo_explicativo_si_expone_el_clima_del_dia(serie, clima_falso):
+    """Es intencionado: mide el techo explicativo, y va etiquetado como tal."""
+    salida, cols = externos.unir(serie, modo="explicativo", ruta_clima=clima_falso)
+    assert salida["lluvia_mm"].iloc[5] == pytest.approx(5.0)
+    assert "lluvia_mm" in cols
+
+
+def test_modo_ninguno_no_añade_nada(serie, clima_falso):
+    salida, cols = externos.unir(serie, modo="ninguno", ruta_clima=clima_falso)
+    assert cols == []
+    assert list(salida.columns) == list(serie.columns)
+
+
+def test_las_variables_operativas_no_ven_el_futuro(serie, clima_falso):
+    """Ninguna columna operativa puede correlacionar perfecto con su propio día."""
+    salida, cols = externos.unir(serie, modo="operativo", ruta_clima=clima_falso)
+    lluvia_hoy = np.arange(len(serie), dtype=float)
+    ayer = salida["lluvia_mm_ayer"].to_numpy()
+    valido = ~np.isnan(ayer)
+    # desplazado exactamente un día: nunca igual al valor del propio día
+    assert not np.allclose(ayer[valido], lluvia_hoy[valido])
+
+
+def test_festivo_marca_los_dias_correctos(serie):
+    fest = externos.cargar_festivos(serie["fecha"])
+    assert set(fest["es_festivo"].unique()) <= {0, 1}
+    # la víspera de un festivo es el día anterior a uno marcado
+    for i in range(len(fest) - 1):
+        if fest["es_festivo"].iloc[i + 1] == 1:
+            esperado = (fest["fecha"].iloc[i] + pd.Timedelta(days=1)).date()
+            if esperado == fest["fecha"].iloc[i + 1].date():
+                assert fest["vispera_festivo"].iloc[i] == 1

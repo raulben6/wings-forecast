@@ -5,6 +5,11 @@ Pipeline completo: datos -> exploración -> referencias -> modelos -> informe.
 
     python scripts/run_analysis.py
 
+Evalúa tres conjuntos de variables:
+  ninguno      calendario y retardos de la propia serie
+  operativo    + festivos + clima de ayer      (usable en producción)
+  explicativo  + festivos + clima de hoy       (techo explicativo, no usable)
+
 Escribe las figuras en `reports/figures/` y los resultados en
 `reports/resultados.md`. Es determinista: misma entrada, misma salida.
 """
@@ -16,10 +21,24 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
-from src import caracteristicas, datos, evaluacion, graficos, modelos, referencias
+from src import caracteristicas, datos, evaluacion, externos, graficos, modelos, referencias
 
 FIGURAS = RAIZ / "reports" / "figures"
 INFORME = RAIZ / "reports" / "resultados.md"
+
+MODOS = {
+    "ninguno": "Calendar + lags only",
+    "operativo": "+ holidays + yesterday's weather",
+    "explicativo": "+ holidays + same-day weather",
+}
+
+
+def preparar(df, modo):
+    """Devuelve (tabla lista para modelar, columnas predictoras)."""
+    extendido, _ = externos.unir(df, modo=modo)
+    X = caracteristicas.construir(extendido)
+    _, _, tabla, columnas = caracteristicas.matriz(X)
+    return tabla, columnas
 
 
 def main():
@@ -29,43 +48,60 @@ def main():
     df = datos.cargar()
     res = datos.resumen(df)
     semanal = datos.por_dia_semana(df)
-    print(f"[1/5] {res['observaciones']} días operativos, {res['desde']} a {res['hasta']}")
+    print(f"[1/6] {res['observaciones']} días operativos, {res['desde']} a {res['hasta']}")
 
     # --- 2. Exploración -----------------------------------------------------
     graficos.serie_temporal(df, FIGURAS / "01_serie_temporal.png")
     graficos.distribucion_dia_semana(df, FIGURAS / "02_dia_semana.png")
     graficos.mezcla_canales(df, FIGURAS / "03_canales.png")
-    print("[2/5] figuras exploratorias listas")
 
-    # --- 3. Variables -------------------------------------------------------
-    X = caracteristicas.construir(df)
-    _, _, tabla, columnas = caracteristicas.matriz(X)
-    print(f"[3/5] {len(columnas)} variables, {len(tabla)} filas con retardos completos")
+    # --- 3. Fuentes externas: descriptivo -----------------------------------
+    tabla_festivos = externos.resumen_festivos(df)
+    tabla_cierres = externos.cierres(df)
+    con_clima, _ = externos.unir(df, modo="explicativo")
+    graficos.lluvia_vs_ventas(con_clima, FIGURAS / "08_lluvia.png")
+    graficos.desplazamiento_canal(con_clima, FIGURAS / "10_canal_lluvia.png")
+    tabla_lluvia = externos.efecto_lluvia(con_clima)
+    corr_lluvia = con_clima[["total", "lluvia_mm", "horas_lluvia", "temp_max"]].corr()["total"]
+    corr_canal = externos.con_margen(con_clima)[["lluvia_mm", "cuota_delivery"]].corr().iloc[0, 1]
+    print(f"[2/6] festivos abiertos: {len(tabla_festivos)} · cierres: {len(tabla_cierres)} "
+          f"({(tabla_cierres['festivo'] != '').sum()} en festivo)")
+    print(f"[3/6] correlación lluvia/total: {corr_lluvia['lluvia_mm']:+.3f} · "
+          f"lluvia/cuota delivery: {corr_canal:+.3f}")
 
-    # --- 4. Walk-forward: referencias y modelos -----------------------------
-    metodos = dict(referencias.REFERENCIAS)
-    metodos.update(modelos.construir(tabla, columnas))
-
+    # --- 4. Referencias (no dependen de las variables) ----------------------
     resultados = {}
-    for nombre, metodo in metodos.items():
+    for nombre, metodo in referencias.REFERENCIAS.items():
         resultados[nombre] = evaluacion.walk_forward(df, metodo)
-        m = evaluacion.metricas(resultados[nombre]["real"], resultados[nombre]["pred"])
-        print(f"      {nombre:22} MAE {m['MAE']:6.2f}   MAPE {m['MAPE']:5.1f}%")
+
+    # --- 5. Modelos en los tres modos ---------------------------------------
+    por_modo = {}
+    for modo, etiqueta in MODOS.items():
+        tabla, columnas = preparar(df, modo)
+        print(f"[4/6] modo {modo:12} {len(columnas):3} variables")
+        for nombre, metodo in modelos.construir(tabla, columnas).items():
+            clave = f"{nombre} [{modo}]"
+            resultados[clave] = evaluacion.walk_forward(df, metodo)
+            m = evaluacion.metricas(resultados[clave]["real"], resultados[clave]["pred"])
+            por_modo.setdefault(modo, {})[nombre] = m["MAE"]
+            print(f"        {nombre:20} MAE {m['MAE']:6.2f}   MAPE {m['MAPE']:5.1f}%")
 
     comparativa = evaluacion.tabla_comparativa(resultados, referencias.PRINCIPAL)
     mejor = comparativa.iloc[0]["metodo"]
     mae_ref = float(comparativa.loc[comparativa["metodo"] == referencias.PRINCIPAL, "MAE"].iloc[0])
-    print(f"[4/5] mejor método: {mejor}")
+    print(f"[5/6] mejor método: {mejor}")
 
     graficos.comparacion_modelos(comparativa, FIGURAS / "04_comparacion.png", mae_ref)
     graficos.real_vs_prediccion(resultados[mejor], FIGURAS / "05_real_vs_pred.png", mejor)
     graficos.error_por_dia(evaluacion.error_por_dia(resultados[mejor]),
                            FIGURAS / "06_error_por_dia.png")
+    graficos.aporte_externos(por_modo, MODOS, FIGURAS / "09_aporte_externos.png")
 
-    imp = modelos.importancia_por_permutacion(tabla, columnas)
+    tabla_exp, cols_exp = preparar(df, "explicativo")
+    imp = modelos.importancia_por_permutacion(tabla_exp, cols_exp)
     graficos.importancia(imp, FIGURAS / "07_importancia.png")
 
-    # --- 5. Informe ---------------------------------------------------------
+    # --- 6. Informe ---------------------------------------------------------
     lo, hi = evaluacion.intervalo_bootstrap(resultados[mejor]["real"], resultados[mejor]["pred"])
     n_val = len(resultados[mejor])
 
@@ -86,22 +122,57 @@ def main():
         "",
         semanal.to_markdown(),
         "",
+        "## Public holidays",
+        "",
+        f"Only **{len(tabla_festivos)} holidays fall on a day the business opened**, so no "
+        "reliable sales effect can be estimated from them.",
+        "",
+        tabla_festivos.to_markdown(index=False) if len(tabla_festivos) else "_none_",
+        "",
+        f"Closures (weekdays with no record): **{len(tabla_cierres)}**, of which "
+        f"**{(tabla_cierres['festivo'] != '').sum()} are public holidays**.",
+        "",
+        tabla_cierres.to_markdown(index=False) if len(tabla_cierres) else "_none_",
+        "",
+        "## Weather",
+        "",
+        "Correlation of daily sales with same-day weather:",
+        "",
+        corr_lluvia.drop("total").round(3).to_markdown(),
+        "",
+        f"Sales barely move with rain (r = {corr_lluvia['lluvia_mm']:+.3f}), but the "
+        f"**channel mix does**: rainfall against delivery share gives r = {corr_canal:+.3f}.",
+        "",
+        "### Dry days vs rainy days",
+        "",
+        tabla_lluvia.to_markdown(index=False),
+        "",
+        "Rain does not remove demand, it relocates it to the delivery marketplace. "
+        "Because that channel carries a 24% commission plus 13% VAT on the commission, "
+        "the same revenue converts into less money.",
+        "",
         "## Forecast accuracy",
         "",
         f"Walk-forward validation over **{n_val} one-step-ahead forecasts**. "
-        f"Each prediction uses only data from earlier days.",
+        "Each prediction uses only data from earlier days.",
         "",
         comparativa.to_markdown(index=False),
         "",
         f"Best method: **{mejor}**, MAE 95% CI **[{lo:.2f}, {hi:.2f}]** (bootstrap, 2000 resamples).",
         "",
+        "### Does external data help?",
+        "",
+        "MAE by feature set:",
+        "",
+        _tabla_modos(por_modo),
+        "",
         "## Where the error lives",
         "",
         evaluacion.error_por_dia(resultados[mejor]).to_markdown(),
         "",
-        "## Variable importance",
+        "## Variable importance (explanatory feature set)",
         "",
-        imp.head(12).round(3).to_markdown(index=False),
+        imp.head(15).round(3).to_markdown(index=False),
         "",
     ]
     INFORME.parent.mkdir(parents=True, exist_ok=True)
@@ -112,11 +183,27 @@ def main():
                     "mejor": mejor,
                     "n_validacion": n_val,
                     "ic95_mae": [round(lo, 3), round(hi, 3)],
+                    "mae_por_modo": por_modo,
+                    "correlacion_clima": corr_lluvia.drop("total").round(4).to_dict(),
+                    "correlacion_lluvia_cuota_delivery": round(float(corr_canal), 4),
+                    "efecto_lluvia": tabla_lluvia.to_dict("records"),
+                    "festivos_abiertos": len(tabla_festivos),
+                    "cierres": len(tabla_cierres),
                     "comparativa": comparativa.to_dict("records")},
                    indent=2, ensure_ascii=False),
         encoding="utf-8")
 
-    print(f"[5/5] informe en {INFORME.relative_to(RAIZ)}")
+    print(f"[6/6] informe en {INFORME.relative_to(RAIZ)}")
+
+
+def _tabla_modos(por_modo):
+    import pandas as pd
+    filas = []
+    for modo, etiqueta in MODOS.items():
+        fila = {"feature set": etiqueta}
+        fila.update({k: round(v, 2) for k, v in por_modo.get(modo, {}).items()})
+        filas.append(fila)
+    return pd.DataFrame(filas).to_markdown(index=False)
 
 
 if __name__ == "__main__":

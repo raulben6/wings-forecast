@@ -187,3 +187,110 @@ def importancia(tabla, ruta, top=12):
             "Permutation importance on held-out days, MAE loss")
     ax.set_xlabel("Increase in MAE when shuffled", color=TEXTO_SEC, fontsize=10)
     return _guardar(fig, ruta)
+
+
+def lluvia_vs_ventas(df, ruta):
+    """
+    Ventas en días secos frente a días de lluvia.
+
+    Comparación cruda, sin controlar por día de la semana: eso lo hace el
+    modelo. Aquí solo se mira si a simple vista hay efecto.
+    """
+    seco = df.loc[df["lluvia_mm"] == 0, "total"]
+    ligera = df.loc[(df["lluvia_mm"] > 0) & (df["lluvia_mm"] < 5), "total"]
+    fuerte = df.loc[df["lluvia_mm"] >= 5, "total"]
+
+    grupos = [seco, ligera, fuerte]
+    etiquetas = [f"Dry\nn={len(seco)}", f"Light rain\nn={len(ligera)}",
+                 f"Rain >= 5mm\nn={len(fuerte)}"]
+
+    fig, ax = _base(7.5, 4)
+    bp = ax.boxplot(grupos, patch_artist=True, widths=0.5,
+                    medianprops=dict(color=SUPERFICIE, linewidth=2),
+                    whiskerprops=dict(color=TEXTO_SEC, linewidth=1),
+                    capprops=dict(color=TEXTO_SEC, linewidth=1),
+                    flierprops=dict(marker="o", markersize=4,
+                                    markerfacecolor=TEXTO_SEC,
+                                    markeredgecolor="none", alpha=0.45))
+    for caja in bp["boxes"]:
+        caja.set(facecolor=SERIE[0], edgecolor="none", alpha=0.9)
+
+    ax.set_xticklabels(etiquetas)
+    for i, g in enumerate(grupos, start=1):
+        if len(g):
+            ax.text(i, g.mean(), f"{g.mean():.0f}", ha="center", va="center",
+                    color=SUPERFICIE, fontsize=9, fontweight="700", zorder=5)
+
+    _titulo(ax, "Sales on dry days vs rainy days",
+            "Not controlled for weekday; the number is the mean")
+    ax.set_ylabel("Sales index", color=TEXTO_SEC, fontsize=10)
+    return _guardar(fig, ruta)
+
+
+def aporte_externos(por_modo, etiquetas_modo, ruta):
+    """MAE de cada modelo con y sin las fuentes externas."""
+    modos = [m for m in etiquetas_modo if m in por_modo]
+    nombres = sorted({n for d in por_modo.values() for n in d})
+
+    fig, ax = _base(8.5, 4)
+    ancho = 0.8 / max(len(nombres), 1)
+    x = np.arange(len(modos))
+
+    for j, nombre in enumerate(nombres):
+        valores = [por_modo[m].get(nombre, np.nan) for m in modos]
+        pos = x + j * ancho - 0.4 + ancho / 2
+        ax.bar(pos, valores, width=ancho * 0.88, color=SERIE[j % len(SERIE)],
+               label=nombre, zorder=2)
+        for p, v in zip(pos, valores):
+            if not np.isnan(v):
+                ax.text(p, v, f"{v:.1f}", ha="center", va="bottom",
+                        fontsize=8.5, color=TEXTO_SEC)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([etiquetas_modo[m] for m in modos], fontsize=9)
+    ax.set_ylim(0, max(v for d in por_modo.values() for v in d.values()) * 1.18)
+    _titulo(ax, "Do holidays and weather help?",
+            "Mean absolute error by feature set. Lower is better.")
+    ax.set_ylabel("MAE", color=TEXTO_SEC, fontsize=10)
+    ax.legend(frameon=False, loc="upper right", fontsize=9,
+              labelcolor=TEXTO_SEC, ncol=2)
+    return _guardar(fig, ruta)
+
+
+def desplazamiento_canal(df, ruta, umbral=5.0):
+    """
+    Cuota del canal de delivery en días secos y lluviosos.
+
+    Es el gráfico que explica por qué el clima no mejora la predicción del
+    total: la lluvia no quita demanda, la cambia de canal.
+    """
+    cuota = (df["delivery"] / df["total"]) * 100
+    seco = cuota[df["lluvia_mm"] == 0]
+    ligera = cuota[(df["lluvia_mm"] > 0) & (df["lluvia_mm"] < umbral)]
+    fuerte = cuota[df["lluvia_mm"] >= umbral]
+
+    grupos = [seco, ligera, fuerte]
+    etiquetas = [f"Dry\nn={len(seco)}", f"Light rain\nn={len(ligera)}",
+                 f"Rain >= {umbral:g}mm\nn={len(fuerte)}"]
+
+    fig, ax = _base(7.5, 4)
+    bp = ax.boxplot(grupos, patch_artist=True, widths=0.5,
+                    medianprops=dict(color=SUPERFICIE, linewidth=2),
+                    whiskerprops=dict(color=TEXTO_SEC, linewidth=1),
+                    capprops=dict(color=TEXTO_SEC, linewidth=1),
+                    flierprops=dict(marker="o", markersize=4,
+                                    markerfacecolor=TEXTO_SEC,
+                                    markeredgecolor="none", alpha=0.45))
+    for caja in bp["boxes"]:
+        caja.set(facecolor=SERIE[2], edgecolor="none", alpha=0.9)
+
+    ax.set_xticklabels(etiquetas)
+    for i, g in enumerate(grupos, start=1):
+        if len(g):
+            ax.text(i, g.mean(), f"{g.mean():.0f}%", ha="center", va="center",
+                    color=SUPERFICIE, fontsize=9, fontweight="700", zorder=5)
+
+    _titulo(ax, "Rain moves demand to delivery",
+            "Delivery share of daily revenue. The number is the mean.")
+    ax.set_ylabel("Delivery share (%)", color=TEXTO_SEC, fontsize=10)
+    return _guardar(fig, ruta)

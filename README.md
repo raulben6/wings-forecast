@@ -3,20 +3,19 @@
 ![Python](https://img.shields.io/badge/Python_3-3776AB?style=flat-square&logo=python&logoColor=white)
 ![pandas](https://img.shields.io/badge/pandas-150458?style=flat-square&logo=pandas&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikitlearn&logoColor=white)
-![matplotlib](https://img.shields.io/badge/matplotlib-11557C?style=flat-square)
-![Tests](https://img.shields.io/badge/9_tests-6E9F18?style=flat-square&logo=pytest&logoColor=white)
+![SciPy](https://img.shields.io/badge/SciPy-8CAAE6?style=flat-square&logo=scipy&logoColor=white)
+![Open-Meteo](https://img.shields.io/badge/Open--Meteo-FF6B35?style=flat-square)
+![Tests](https://img.shields.io/badge/15_tests-6E9F18?style=flat-square&logo=pytest&logoColor=white)
 
-**Forecasting daily sales for a small restaurant, using 227 days of its real operating data.**
+**Forecasting daily sales for a small restaurant, using 227 days of its real operating data, a public holiday calendar, and daily weather history.**
 
-A restaurant buys perishable stock against a guess. Guess high and it rots, guess low and it turns customers away. The question this project answers is narrow and practical: **how much better than "the same as last week" can we actually do, and is a machine learning model worth the complexity?**
+A restaurant buys perishable stock against a guess. Guess high and it rots, guess low and it turns customers away. The question is narrow and practical: **how much better than "the same as last week" can we do, and is a machine learning model worth the complexity?**
 
-The answer turned out to be interesting, and it is not the one a portfolio project usually reports.
+Three findings came out, and two of them are negative. They are reported anyway, because that is the point.
 
 ---
 
-## 🎯 The headline finding
-
-> **A day-of-week historical average beat both machine learning models.**
+## 🎯 Finding 1: the simplest method wins
 
 | Method | MAE | RMSE | MAPE | vs. baseline |
 |---|---:|---:|---:|---:|
@@ -29,30 +28,75 @@ The answer turned out to be interesting, and it is not the one a portfolio proje
 
 ![Forecast error by method](reports/figures/04_comparacion.png)
 
-**And the honest caveat that matters more than the ranking:** the 95% bootstrap confidence interval for the winner's MAE is **[22.62, 29.28]**. Ridge and gradient boosting both sit inside it. **The top three are statistically tied.** Declaring a winner from these 152 forecasts would be reading noise.
+**The caveat matters more than the ranking.** The winner's 95% bootstrap CI for MAE is **[22.62, 29.28]**, and both models sit inside it. **The top three are statistically tied.** Declaring a winner from 152 forecasts would be reading noise.
 
 So the defensible conclusion is not "day-of-week average is best". It is:
 
 1. Every method **comfortably beats** the heuristic a manager would use by hand, by 18 to 28 percent.
-2. **Nothing beats a weekday average by enough to justify its complexity.** Deploying a gradient boosting model here would add maintenance, a training pipeline and an inference dependency to buy an error difference the data cannot even resolve.
+2. **Nothing beats a weekday average by enough to justify its complexity.** Shipping a gradient boosting model here would add a training pipeline, a serving dependency and maintenance to buy a difference the data cannot resolve.
 
-That is a real result, and shipping a model anyway would have been the wrong call.
-
----
-
-## 🔍 Why the simple method holds up
-
-The permutation importance explains it. Trained on held-out days, the gradient boosting model leans almost entirely on three things:
+Permutation importance shows why: the model spent its features rediscovering *what day is it, and how has business been lately*, which is exactly what the simple average already encodes.
 
 ![Which variables carry the model](reports/figures/07_importancia.png)
 
-| Variable | What it is |
-|---|---|
-| `media_24` | 4-week moving average, the recent **level** |
-| `media_dia_semana` | historical mean for that **weekday** |
-| `es_saturday` | the Saturday indicator |
+---
 
-The model spent 18 features to rediscover "*what day is it, and how has business been lately*". That is precisely what the day-of-week average already encodes, so it cannot do much better. Trend, month and most lags contribute nothing measurable.
+## 🌧️ Finding 2: weather and holidays do not improve the forecast
+
+The obvious next move is to add external drivers. So both were added: **El Salvador's public holiday calendar** (via the `holidays` package) and **daily weather for San Salvador** (Open-Meteo reanalysis: rainfall, rain hours, max and min temperature).
+
+They made the models **worse**.
+
+![Do holidays and weather help](reports/figures/09_aporte_externos.png)
+
+| Feature set | Ridge | Gradient boosting |
+|---|---:|---:|
+| Calendar + lags only | **26.44** | 27.33 |
+| + holidays + yesterday's weather | 28.66 | 27.79 |
+| + holidays + same-day weather | 29.00 | **27.29** |
+
+Ridge degraded clearly, gradient boosting stayed flat. Ten extra columns of mostly-noise cost variance and bought nothing.
+
+**Why the holidays could never have worked:** only **3 public holidays fall on a day the business opened.** A binary indicator with three positive cases out of 227 cannot support an estimate, and any coefficient fitted on it would be noise wearing the costume of a finding.
+
+What holidays *do* predict is **closure**. Of the 7 weekdays with no sales record, **4 are public holidays** (Christmas, New Year, Good Friday, Holy Saturday). That is a real result, just a different one from the one being looked for.
+
+### The honest split that most projects skip
+
+Tomorrow's weather is **not available today**. What exists is a forecast, with its own error. So the weather features were evaluated twice:
+
+| Mode | Uses | Answers |
+|---|---|---|
+| **Operational** | yesterday's observed weather | what could genuinely run in production |
+| **Explanatory** | today's observed weather | the ceiling: how much could a perfect forecast buy? |
+
+Neither helped. The explanatory mode is the upper bound, so **no weather forecast, however good, would have rescued this**. Reporting only the explanatory number and calling it prediction is the classic version of this mistake, and six tests exist specifically to keep the operational mode from seeing its own day.
+
+---
+
+## 💡 Finding 3: rain does not remove demand, it relocates it
+
+This is the one worth acting on.
+
+Rainfall barely correlates with total sales (**r = +0.057**). But against the **delivery share** of revenue, r = **+0.182**, and the picture is unambiguous:
+
+![Rain moves demand to delivery](reports/figures/10_canal_lluvia.png)
+
+| | Dry (n=83) | Rain ≥ 5mm (n=32) | Change | p |
+|---|---:|---:|---:|---:|
+| Total sales | 93.3 | 116.2 | +24.6% | 0.047 |
+| Delivery revenue | 11.4 | 29.4 | **+158%** | |
+| **Delivery share** | **12.2%** | **24.5%** | **+101%** | **0.001** |
+| Net of commissions | 89.3 | 107.2 | +20.1% | |
+| **Margin** | **95.7%** | **92.4%** | **-3.25 pp** | **0.0009** |
+
+Customers who would have walked in order delivery instead. The totals compensate, which is precisely **why weather cannot help forecast the total**: the signal is in the composition, not the level.
+
+And the composition costs money. The delivery marketplace charges **24% commission plus 13% VAT on that commission**, an effective 27.1% (rates documented publicly in [RestoPos](https://github.com/raulben6/restopos), the POS this business runs). So a rainy day converts the same revenue into **3.25 percentage points less margin**, and that difference is strongly significant.
+
+**What a manager can do with this:** on a rainy forecast, staff the kitchen for delivery throughput rather than counter service, make sure packaging stock is there, and expect the day to be worth less than the till suggests.
+
+> ⚠️ **Read the total-sales row with care.** The +24.6% is only marginally significant (p = 0.047) and is confounded: rainy days cluster in the wet season and are not evenly spread across weekdays. The **compositional** result is the robust one, because a share is far less sensitive to level confounds than a mean is.
 
 ---
 
@@ -60,11 +104,9 @@ The model spent 18 features to rediscover "*what day is it, and how has business
 
 ![Daily sales](reports/figures/01_serie_temporal.png)
 
-227 trading days, October 2025 to June 2026. The business is **closed on Sundays**, so the series runs on a six-day week and every lag in the code is measured in openings, not calendar days. "A week ago" is six rows back, which keeps weekday alignment intact.
+227 trading days, October 2025 to June 2026. The business is **closed on Sundays**, so the series runs on a six-day week and every lag is measured in openings, not calendar days. "A week ago" is six rows back, which keeps weekday alignment intact.
 
-The series is genuinely noisy: **coefficient of variation 41%**, values ranging from 23 to 304 around a mean of 100.
-
-### The weekly pattern is the strongest signal
+The series is genuinely noisy: **coefficient of variation 41%**, ranging from 23 to 304 around a mean of 100.
 
 ![Sales by day of week](reports/figures/02_dia_semana.png)
 
@@ -77,32 +119,17 @@ The series is genuinely noisy: **coefficient of variation 41%**, values ranging 
 | **Friday** | **137.2** | 41.2 |
 | Saturday | 73.7 | 31.2 |
 
-**Friday is the peak and Saturday is the trough.** That inverts the usual restaurant pattern and says something concrete about the business: it lives on weekday trade, not weekend leisure. Saturday sells barely half of Friday.
-
-Thursday is the volatile one, with the widest spread of any day (std 50.2).
-
-### Revenue mix
+**Friday is the peak and Saturday the trough.** That inverts the usual restaurant pattern and says something concrete: this business lives on weekday trade, not weekend leisure. Saturday sells barely half of Friday.
 
 ![Revenue mix by channel](reports/figures/03_canales.png)
 
-Cash 47%, card 35%, delivery marketplace 18%.
+Cash 47%, card 35%, delivery 18%.
 
----
-
-## 🎯 Where the error actually lives
+### Where the error lives
 
 ![Where the model misses](reports/figures/06_error_por_dia.png)
 
-| Day | MAE |
-|---|---:|
-| Wednesday | 16.8 |
-| Saturday | 22.7 |
-| Tuesday | 25.0 |
-| Monday | 28.4 |
-| Friday | 30.4 |
-| **Thursday** | **32.0** |
-
-Error concentrates on **Thursday and Friday**, the two highest-volume days. That is not a modelling failure so much as a description of the business: the busy days are the variable ones, and they are also the days where a purchasing mistake costs the most. Wednesday, the most predictable day, is almost twice as accurate as Thursday.
+Error concentrates on **Thursday (MAE 32.0) and Friday (30.4)**, the two highest-volume days, which are also the days a purchasing mistake costs the most. Wednesday, the most predictable, is almost twice as accurate.
 
 ![Actual vs predicted](reports/figures/05_real_vs_pred.png)
 
@@ -112,14 +139,12 @@ Error concentrates on **Thursday and Friday**, the two highest-volume days. That
 
 **Validation is walk-forward (rolling origin), never a random split.**
 
-This is the single most common error in time-series work. A random `train_test_split` scatters future days into training and past days into test, so the model forecasts Tuesday having already seen Thursday. The reported error looks superb and the model is worthless, because in production the future is not available.
+A random `train_test_split` scatters future days into training and past days into test, so the model forecasts Tuesday having already seen Thursday. The reported error looks superb and the model is worthless.
 
-Here, every one of the 152 forecasts uses **only data from days strictly before it**, and the models retrain at each step on the expanding window.
-
-That claim is not left to trust. The test suite enforces it:
+Here, every one of the 152 forecasts uses **only data from days strictly before it**, and the models retrain at each step on the expanding window. That claim is not left to trust:
 
 ```bash
-python -m pytest tests/ -q     # 9 passed
+python -m pytest tests/ -q     # 15 passed
 ```
 
 | Test | What it proves |
@@ -130,25 +155,26 @@ python -m pytest tests/ -q     # 9 passed
 | `test_media_dia_semana_solo_mira_atras` | the expanding weekday mean excludes the current row |
 | `test_ninguna_variable_correlaciona_perfecto_con_el_objetivo` | no feature is a copy of the target |
 | `test_walk_forward_nunca_entrega_el_futuro` | the history handed to every method ends before the target date |
+| `test_modo_operativo_usa_el_clima_de_ayer` | operational weather is shifted exactly one opening |
+| `test_modo_operativo_no_expone_el_clima_del_dia` | same-day weather columns are absent from the operational set |
+| `test_modo_explicativo_si_expone_el_clima_del_dia` | the explanatory mode is deliberate and labelled |
 
 ---
 
 ## ⚠️ Limitations, stated plainly
 
-- **227 observations is a small sample.** Every metric here carries a wide interval, which is why the MAE is reported with a bootstrap CI rather than as a single number.
-- **A 35% MAPE is high.** Useful for directional purchasing decisions, not for precise cash planning.
-- **The biggest drivers are missing from the data**: weather, public holidays, local events, promotions, competitor activity, and menu changes. A large share of the residual variance is almost certainly explainable, just not by anything in this spreadsheet.
+- **227 observations is a small sample.** Every metric carries a wide interval, which is why the MAE is reported with a bootstrap CI rather than a single number.
+- **A 35% MAPE is high.** Useful for directional purchasing, not for precise cash planning.
+- **The holiday effect is unestimable here**, not absent. Three open holidays is not a sample.
+- **Drivers still missing**: local and municipal festivities, promotions, competitor activity, menu changes, and payday timing beyond the crude fortnight flag.
 - **One establishment, nine months.** Nothing here generalises to restaurants in general.
-- Sundays were dropped (2 exceptional openings out of 229), so the model says nothing about them.
 
 ## 🔭 What would actually improve it
 
-In the order I would try them:
-
-1. **A public holiday and local event calendar.** Cheap to add, and likely the single largest gain.
-2. **Weather history**, joined by date. Rain probably moves both footfall and the delivery share.
-3. **Item-level data from the POS**, which exists: [RestoPos](https://github.com/raulben6/restopos) is the point-of-sale system this business runs. Forecasting per product would turn this from a revenue estimate into an actual purchase order.
-4. **Quantile forecasts instead of a point estimate.** For stock decisions, the 80th percentile of demand is a more useful number than the mean.
+1. **Item-level data from the POS**, which exists: [RestoPos](https://github.com/raulben6/restopos) is the system this business runs. Forecasting per product turns a revenue estimate into an actual purchase order.
+2. **Forecast the channel split, not just the total.** Finding 3 says that is where the weather signal lives, and it is also where the margin lives.
+3. **Quantile forecasts instead of a point estimate.** For stock decisions the 80th percentile of demand is more useful than the mean.
+4. **More history.** Two full years would let the holiday question be asked properly.
 
 ---
 
@@ -163,19 +189,27 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 python scripts/run_analysis.py    # figures + reports/resultados.md
-python -m pytest tests/ -q        # 9 tests
+python -m pytest tests/ -q        # 15 tests
+```
+
+The weather history is cached in `data/clima_diario.csv`, so the analysis reproduces offline. To refresh it:
+
+```bash
+python scripts/descargar_clima.py --desde 2025-10-01 --hasta 2026-06-30
 ```
 
 ```
 src/
   datos.py            loading, cleaning, the six-day week
   caracteristicas.py  calendar features, lags, rolling means (all closed at t-1)
+  externos.py         weather and holidays, operational vs explanatory modes
   referencias.py      naive, seasonal naive, moving average, day-of-week mean
   modelos.py          Ridge and gradient boosting, wrapped for walk-forward
   evaluacion.py       rolling-origin validation, metrics, bootstrap CI
   graficos.py         report figures, colorblind-safe palette
 scripts/
   preparar_datos.py   spreadsheet to indexed dataset (run once, locally)
+  descargar_clima.py  Open-Meteo history to a cached CSV
   run_analysis.py     the full pipeline
 reports/
   resultados.md       generated results
@@ -188,11 +222,13 @@ tests/
 
 ## 🔒 About the data
 
-The sales figures belong to a real, identifiable business, so they are **not published in currency**. Every value is divided by the series mean and multiplied by 100, giving a mean of exactly 100 "sales index" units. The divisor is not published.
+Sales figures belong to a real, identifiable business, so they are **not published in currency**. Every value is divided by the series mean and multiplied by 100, giving a mean of exactly 100 "sales index" units. The divisor is not published.
 
-That transform is linear, which is the point: seasonality, relative variance, channel mix, correlations and every percentage metric (MAPE, improvement over baseline) are **completely unaffected**. The analysis is real. Only the absolute scale is withheld.
+That transform is linear, which is the point: seasonality, relative variance, channel mix, correlations, margins and every percentage metric are **completely unaffected**. The analysis is real. Only the absolute scale is withheld.
 
 `scripts/preparar_datos.py` performs that step and is included so the process is auditable. The spreadsheet it reads is gitignored and never committed.
+
+Weather data comes from the [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api) (ERA5 reanalysis), free for non-commercial use with attribution. Holidays come from the [`holidays`](https://pypi.org/project/holidays/) package.
 
 ---
 

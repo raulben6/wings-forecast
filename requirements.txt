@@ -5,6 +5,12 @@ numpy>=1.26
 # Models, validation and permutation importance
 scikit-learn>=1.5
 
+# Welch t-tests for the dry vs rainy comparison
+scipy>=1.11
+
+# Public holiday calendar (El Salvador)
+holidays>=0.50
+
 # Report figures
 matplotlib>=3.8
 

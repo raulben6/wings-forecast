@@ -21,6 +21,65 @@
     22.621,
     29.284
   ],
+  "mae_por_modo": {
+    "ninguno": {
+      "Ridge + calendar": 26.443881019931375,
+      "Gradient boosting": 27.329594845190567
+    },
+    "operativo": {
+      "Ridge + calendar": 28.65782718199775,
+      "Gradient boosting": 27.789648063097754
+    },
+    "explicativo": {
+      "Ridge + calendar": 29.003497721391543,
+      "Gradient boosting": 27.292827251434968
+    }
+  },
+  "correlacion_clima": {
+    "lluvia_mm": 0.0571,
+    "horas_lluvia": 0.0455,
+    "temp_max": -0.0717
+  },
+  "correlacion_lluvia_cuota_delivery": 0.1816,
+  "efecto_lluvia": [
+    {
+      "metric": "Total sales",
+      "dry (n=83)": 93.262,
+      "rain >= 5mm (n=32)": 116.169,
+      "change %": 24.6,
+      "p-value": 0.0475
+    },
+    {
+      "metric": "Delivery revenue",
+      "dry (n=83)": 11.373,
+      "rain >= 5mm (n=32)": 29.357,
+      "change %": 158.1,
+      "p-value": 0.0014
+    },
+    {
+      "metric": "Delivery share",
+      "dry (n=83)": 0.122,
+      "rain >= 5mm (n=32)": 0.245,
+      "change %": 101.3,
+      "p-value": 0.001
+    },
+    {
+      "metric": "Net of commissions",
+      "dry (n=83)": 89.25,
+      "rain >= 5mm (n=32)": 107.177,
+      "change %": 20.1,
+      "p-value": 0.094
+    },
+    {
+      "metric": "Margin",
+      "dry (n=83)": 0.957,
+      "rain >= 5mm (n=32)": 0.924,
+      "change %": -3.4,
+      "p-value": 0.0009
+    }
+  ],
+  "festivos_abiertos": 3,
+  "cierres": 7,
   "comparativa": [
     {
       "metodo": "Day-of-week mean",
@@ -30,18 +89,46 @@
       "mejora MAE %": 27.6
     },
     {
-      "metodo": "Ridge + calendar",
+      "metodo": "Ridge + calendar [ninguno]",
       "MAE": 26.44,
       "RMSE": 34.85,
       "MAPE %": 33.3,
       "mejora MAE %": 25.9
     },
     {
-      "metodo": "Gradient boosting",
+      "metodo": "Gradient boosting [explicativo]",
+      "MAE": 27.29,
+      "RMSE": 36.68,
+      "MAPE %": 35.2,
+      "mejora MAE %": 23.5
+    },
+    {
+      "metodo": "Gradient boosting [ninguno]",
       "MAE": 27.33,
       "RMSE": 36.77,
       "MAPE %": 34.9,
       "mejora MAE %": 23.4
+    },
+    {
+      "metodo": "Gradient boosting [operativo]",
+      "MAE": 27.79,
+      "RMSE": 37.18,
+      "MAPE %": 35.1,
+      "mejora MAE %": 22.1
+    },
+    {
+      "metodo": "Ridge + calendar [operativo]",
+      "MAE": 28.66,
+      "RMSE": 38.34,
+      "MAPE %": 35.2,
+      "mejora MAE %": 19.7
+    },
+    {
+      "metodo": "Ridge + calendar [explicativo]",
+      "MAE": 29.0,
+      "RMSE": 39.11,
+      "MAPE %": 36.3,
+      "mejora MAE %": 18.7
     },
     {
       "metodo": "Moving average (6d)",
